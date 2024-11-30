@@ -31,11 +31,11 @@
     },
 
     'data': [
+        'data/groups.xml',
         'security/ir.model.access.csv',
         'data/transaction_source_data.xml',
 
         'data/seq_journal_entry.xml',
-        'data/groups.xml',
         'data/restaurant_chart_of_accounts.xml',
         'data/customer_types.xml',  # Reference to your XML data file
         'data/unit_measures.xml',  # Reference to your XML data file
