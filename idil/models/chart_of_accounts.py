@@ -516,6 +516,8 @@ class Account(models.Model):
         ('cash', 'Cash'),
         ('bank_transfer', 'Bank'),
         ('payable', 'Account Payable'),
+        ('discount', 'Account Discount'),
+        ('commission', 'Account Commission'),
         ('receivable', 'Account Receivable'),
         ('COGS', 'COGS'),
         ('kitchen', 'kitchen'),
