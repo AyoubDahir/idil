@@ -14,4 +14,4 @@ class ProductMovement(models.Model):
     date = fields.Datetime(string='Date', default=fields.Datetime.now, required=True)
     source_document = fields.Char(string='Source Document')
     manufacturing_order_id = fields.Many2one('idil.manufacturing.order', string='Manufacturing Order')
-    sales_person_id = fields.Many2one('idil.sales.sales_personnel', string='Salesperson', required=True)
+    sales_person_id = fields.Many2one('idil.sales.sales_personnel', string='Salesperson')
