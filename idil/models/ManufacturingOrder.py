@@ -50,7 +50,8 @@ class ManufacturingOrder(models.Model):
         'res.currency',
         string='Currency',
         required=True,
-        default=lambda self: self.env['res.currency'].browse(144),
+        default=lambda self: self.env['res.currency'].search([('name', '=', 'SL')], limit=1),
+
         readonly=True
     )
     rate = fields.Float(string='Exchange Rate', compute='_compute_exchange_rate', store=True, readonly=True)
