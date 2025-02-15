@@ -91,7 +91,7 @@ class ManufacturingOrder(models.Model):
         string="Currency",
         required=True,
         default=lambda self: self.env["res.currency"].search(
-            [("name", "=", "SOS")], limit=1
+            [("name", "=", "SL")], limit=1
         ),
         readonly=True,
     )
