@@ -91,7 +91,7 @@ class SaleOrder(models.Model):
                         )
 
                     # Calculate commission only if validations pass
-                    total_commission += line.quantity * product.commission
+                    total_commission += line.commission_amount
 
             order.commission_amount = total_commission
 
