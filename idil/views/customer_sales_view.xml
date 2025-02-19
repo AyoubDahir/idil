@@ -50,30 +50,20 @@
                                         width="25%"/>
 
                                         
-                                    <field name="cost_price" width="25%"/>
-                                    <field name="cogs" width="25%" sum="Total"/>
-                                    
+                                     
                                     <field name="price_unit" string="Unit Price" width="25%"/>
                                     <field name="subtotal" string="Subtotal" sum="Total" readonly="1" width="25%"/>
-                                    <field name="profit"  sum="Total" readonly="1" width="25%"/>
-                                    
+                                     
                                 </tree>
                             </field>
                         </page>
-                        <!-- Payment Details Tab -->
-                        <page string="Payment Details">
+                   
                             <group>
                                 <field name="total_paid" string="Total Paid" readonly="1"/>
                                 <field name="balance_due" string="Balance Due" readonly="1"/>
                             </group>
-                            <field name="payment_lines">
-                                <tree editable="bottom">
-                                    <field name="payment_method" string="Payment Method" required="1"/>
-                                    <field name="account_id" string="Account" required="1"/>
-                                    <field name="amount" string="Amount" required="1"/>
-                                </tree>
-                            </field>
-                        </page>
+                          
+                      
                     </notebook>
                 </sheet>
             </form>
