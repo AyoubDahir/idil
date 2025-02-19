@@ -249,6 +249,7 @@ class CustomerSaleOrder(models.Model):
                         "description": f"Sales Order -- Expanses COGS account for - {product.name}",
                         "product_id": product.id,
                         "account_number": product.account_cogs_id.id,
+                        # Use the COGS Account_number
                         "transaction_type": "dr",
                         "dr_amount": product_cost_amount,
                         "cr_amount": 0,
