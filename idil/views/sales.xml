@@ -8,6 +8,7 @@
         <field name="arch" type="xml">
             <tree>
                 <field name="name"/>
+                <field name="sales_person_id"/>
                 <field name="order_date"/>
                 <field name="order_total"/>
                 <field name="currency_id"/>
