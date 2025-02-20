@@ -320,6 +320,12 @@
               sequence="5"
               action="action_generate_account_balances"
     />
+     <menuitem id="menu_transaction_report_root"
+              name="Account Statement Report"
+              parent="OtherReports"
+              sequence="1"
+              action="action_transaction_report_wizard"/>
+              
     <menuitem id="Reports_vendor"
               name="Vendor Balances"
               parent="OtherReports"

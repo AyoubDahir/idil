@@ -38,3 +38,4 @@ from . import sale_return
 from . import productmovement
 from . import StockAdjustment
 from . import customer_sales
+from . import account_statement
