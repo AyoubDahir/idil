@@ -123,6 +123,13 @@ class TransactionBooking(models.Model):
         ondelete="cascade",
         help="The sales payment this transaction booking is associated with.",
     )
+    manufacturing_order_id = fields.Many2one(
+        "idil.manufacturing.order",
+        string="Manufacturing Order",
+        required=True,
+        tracking=True,
+        ondelete="cascade",  # Add this to enable automatic deletion
+    )
 
     @api.constrains("amount_paid")
     def _check_amount_paid(self):

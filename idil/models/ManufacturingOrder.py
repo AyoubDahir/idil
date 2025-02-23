@@ -545,6 +545,7 @@ class ManufacturingOrder(models.Model):
                     "idil.transaction_booking"
                 ),
                 "reffno": order.name,
+                "manufacturing_order_id": order.id,
                 "order_number": order.name,
                 "amount": order.product_cost,
                 "trx_date": fields.Date.today(),
@@ -594,6 +595,7 @@ class ManufacturingOrder(models.Model):
             {
                 "product_id": order.product_id.id,  # Corrected reference to order.product_id
                 "movement_type": "in",
+                "manufacturing_order_id": order.id,
                 "quantity": order.product_qty,
                 "date": fields.Datetime.now(),
                 "source_document": order.name,  # Use order.name instead of self.name
@@ -824,7 +826,9 @@ class ManufacturingOrderLine(models.Model):
         string="Manufacturing Order",
         required=True,
         tracking=True,
+        ondelete="cascade",  # Add this to enable automatic deletion
     )
+
     item_id = fields.Many2one("idil.item", string="Item", required=True, tracking=True)
     quantity_bom = fields.Float(
         string="Demand", digits=(16, 5), required=True, tracking=True
