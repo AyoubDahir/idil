@@ -43,3 +43,9 @@ class Customer(models.Model):
         help="Select the Cash account for transactions.",
         required=True,
     )
+    # Relation field to display related sale orders (transactions)
+    sale_order_ids = fields.One2many(
+        "idil.customer.sale.order",  # Model name of the sale order
+        "customer_id",  # Field in the sale order model that links back to customer
+        string="Sale Orders",
+    )
