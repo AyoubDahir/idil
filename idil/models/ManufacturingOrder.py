@@ -343,23 +343,28 @@ class ManufacturingOrder(models.Model):
                     f"Required: {required_balance}, Available: {item_account_balance}"
                 )
 
-        # Create transaction booking
-        booking_lines = []
+        # Create transaction booking record
+        transaction_booking = self.env["idil.transaction_booking"].create(
+            {
+                "transaction_number": self.env["ir.sequence"].next_by_code(
+                    "idil.transaction_booking"
+                ),
+                "reffno": order.name,
+                "manufacturing_order_id": order.id,
+                "order_number": order.name,
+                "amount": order.product_cost,
+                "trx_date": fields.Date.today(),
+                "payment_status": "paid",
+            }
+        )
+
+        # Create transaction booking lines individually
         for line in order.manufacturing_order_line_ids:
             if order.rate <= 0:
                 raise ValidationError("Rate cannot be zero")
 
-            _logger.info("-----------------------------------------------------")
-            _logger.info("Starting currency conversion for item: %s", line.item_id.name)
-            _logger.info(f"Using exchange rate: {order.rate}")
-
             cost_amount_usd = line.cost_price * line.quantity
             cost_amount_sos = cost_amount_usd * order.rate
-            # Use the rate field from the order
-
-            _logger.info(
-                f"Cost amount in USD: {cost_amount_usd}, converted to SOS: {cost_amount_sos}"
-            )
 
             # Get clearing accounts
             source_clearing_account = self.env["idil.chart.account"].search(
@@ -386,98 +391,67 @@ class ManufacturingOrder(models.Model):
                     "Exchange clearing accounts are required for currency conversion."
                 )
 
-            # Debit line for increasing product stock in product SOS currency
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Manufacturing Order Transaction - Debit",
-                        "item_id": line.item_id.id,
-                        "product_id": order.product_id.id,
-                        "account_number": order.product_id.asset_account_id.id,
-                        "transaction_type": "dr",
-                        "dr_amount": cost_amount_sos,
-                        "cr_amount": 0.0,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
-            )
-            _logger.info(
-                f"Debit line to increase product stock in SOS currency for product: {order.product_id.name}, cost amount: {cost_amount_sos}"
+            # Debit line for increasing product stock
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Manufacturing Order Transaction - Debit",
+                    "item_id": line.item_id.id,
+                    "product_id": order.product_id.id,
+                    "account_number": order.product_id.asset_account_id.id,
+                    "transaction_type": "dr",
+                    "dr_amount": line.cost_amount_sos,
+                    "cr_amount": 0.0,
+                    "transaction_date": fields.Date.today(),
+                }
             )
 
-            # Credit the target clearing account for currency adjustment
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Manufacturing Order Transaction Exchange - Credit",
-                        "item_id": line.item_id.id,
-                        "product_id": order.product_id.id,
-                        "account_number": target_clearing_account.id,
-                        "transaction_type": "cr",
-                        "dr_amount": 0.0,
-                        "cr_amount": line.cost_amount_sos,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
-            )
-            _logger.info(
-                "Credit clearing account for account adjustment: %s with currency adjustment amount: %s",
-                line.cost_amount_sos,
-                target_clearing_account.name,
+            # Credit target clearing account for currency adjustment
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Manufacturing Order Transaction Exchange - Credit",
+                    "item_id": line.item_id.id,
+                    "product_id": order.product_id.id,
+                    "account_number": target_clearing_account.id,
+                    "transaction_type": "cr",
+                    "dr_amount": 0.0,
+                    "cr_amount": line.cost_amount_sos,
+                    "transaction_date": fields.Date.today(),
+                }
             )
 
-            # Credit the source clearing account for currency adjustment
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Manufacturing Order Transaction Exchange - Debit",
-                        "item_id": line.item_id.id,
-                        "product_id": order.product_id.id,
-                        "account_number": source_clearing_account.id,
-                        "transaction_type": "dr",
-                        "dr_amount": line.row_total,
-                        "cr_amount": 0.0,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
-            )
-            _logger.info(
-                "Debit clearing account for account adjustment: %s with currency adjustment amount: %s",
-                line.row_total,
-                source_clearing_account.name,
+            # Debit source clearing account for currency adjustment
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Manufacturing Order Transaction Exchange - Debit",
+                    "item_id": line.item_id.id,
+                    "product_id": order.product_id.id,
+                    "account_number": source_clearing_account.id,
+                    "transaction_type": "dr",
+                    "dr_amount": line.row_total,
+                    "cr_amount": 0.0,
+                    "transaction_date": fields.Date.today(),
+                }
             )
 
-            # Credit line to descrease item stock with item currency which is USD
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Manufacturing Order Transaction - Credit",
-                        "item_id": line.item_id.id,
-                        "product_id": order.product_id.id,
-                        "account_number": line.item_id.asset_account_id.id,
-                        "transaction_type": "cr",
-                        "dr_amount": 0.0,
-                        "cr_amount": line.row_total,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
+            # Credit item asset account to decrease stock in USD
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Manufacturing Order Transaction - Credit",
+                    "item_id": line.item_id.id,
+                    "product_id": order.product_id.id,
+                    "account_number": line.item_id.asset_account_id.id,
+                    "transaction_type": "cr",
+                    "dr_amount": 0.0,
+                    "cr_amount": line.row_total,
+                    "transaction_date": fields.Date.today(),
+                }
             )
-            _logger.info(
-                f"Credit line to decrease item stock in USD currency for item: {line.item_id.name}, cost amount: {line.row_total}"
-            )
-        # Add commission booking lines if applicable
+
+        # Handle commission transactions
         if order.commission_amount > 0:
             if not order.product_id.account_id:
                 raise ValidationError(
@@ -489,87 +463,48 @@ class ManufacturingOrder(models.Model):
                 != order.commission_employee_id.account_id.currency_id
             ):
                 raise ValidationError(
-                    f"The currency for the product's account and the employee's commission account must be the same. "
-                    f"Product Account Currency: {order.product_id.account_id.currency_id.name}, "
-                    f"Employee Account Currency: {order.commission_employee_id.account_id.currency_id.name}."
+                    f"The currency for the product's account and the employee's commission account must be the same."
                 )
 
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Commission Expense",
-                        "product_id": order.product_id.id,
-                        "account_number": order.product_id.account_id.id,
-                        "transaction_type": "dr",
-                        "dr_amount": order.commission_amount,
-                        "cr_amount": 0.0,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
-            )
-            _logger.info(
-                f"Debit line to increase product commission account for product: {order.product_id.name}, commission amount: {order.commission_amount}"
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Commission Expense",
+                    "product_id": order.product_id.id,
+                    "account_number": order.product_id.account_id.id,
+                    "transaction_type": "dr",
+                    "dr_amount": order.commission_amount,
+                    "cr_amount": 0.0,
+                    "transaction_date": fields.Date.today(),
+                }
             )
 
-            if not order.commission_employee_id.account_id:
-                raise ValidationError(
-                    f"The employee '{order.commission_employee_id.name}' does not have a valid commission account."
-                )
-
-            booking_lines.append(
-                (
-                    0,
-                    0,
-                    {
-                        "order_line": len(booking_lines) + 1,
-                        "description": "Commission Liability",
-                        "product_id": order.product_id.id,
-                        "account_number": order.commission_employee_id.account_id.id,
-                        "transaction_type": "cr",
-                        "dr_amount": 0.0,
-                        "cr_amount": order.commission_amount,
-                        "transaction_date": fields.Date.today(),
-                    },
-                )
-            )
-            _logger.info(
-                f"Credit line to decrease employee commission account for employee: {order.commission_employee_id.name}, commission amount: {order.commission_amount}"
+            self.env["idil.transaction_bookingline"].create(
+                {
+                    "transaction_booking_id": transaction_booking.id,
+                    "description": "Commission Liability",
+                    "product_id": order.product_id.id,
+                    "account_number": order.commission_employee_id.account_id.id,
+                    "transaction_type": "cr",
+                    "dr_amount": 0.0,
+                    "cr_amount": order.commission_amount,
+                    "transaction_date": fields.Date.today(),
+                }
             )
 
-        transaction_booking = self.env["idil.transaction_booking"].create(
-            {
-                "transaction_number": self.env["ir.sequence"].next_by_code(
-                    "idil.transaction_booking"
-                ),
-                "reffno": order.name,
-                "manufacturing_order_id": order.id,
-                "order_number": order.name,
-                "amount": order.product_cost,
-                "trx_date": fields.Date.today(),
-                "payment_status": "paid",
-                "booking_lines": booking_lines,
-            }
-        )
-
-        order.write({"transaction_booking_id": transaction_booking.id})
-
-        # Increase the product's stock quantity based on the BOM
-        if order and order.bom_id and order.bom_id.product_id:
+        # Update stock quantity for manufactured product
+        if order.bom_id and order.bom_id.product_id:
             product = order.bom_id.product_id
             product.stock_quantity += order.product_qty
             product.write({"stock_quantity": product.stock_quantity})
 
-        # Attempt to adjust stock levels
+        # Adjust stock levels for items used in manufacturing
         try:
             for line in order.manufacturing_order_line_ids:
                 if line.item_id.item_type == "inventory":
                     if line.item_id.quantity < line.quantity:
                         raise ValidationError(
-                            f"Insufficient stock for item '{line.item_id.name}'. Current stock: {line.item_id.quantity}, "
-                            f"Requested: {line.quantity}"
+                            f"Insufficient stock for item '{line.item_id.name}'. Current stock: {line.item_id.quantity}, Requested: {line.quantity}"
                         )
                     with self.env.cr.savepoint():
                         line.item_id.with_context(
@@ -578,6 +513,7 @@ class ManufacturingOrder(models.Model):
         except ValidationError as e:
             raise ValidationError(e.args[0])
 
+        # Create commission record if applicable
         if order.commission_amount > 0:
             self.env["idil.commission"].create(
                 {
@@ -591,18 +527,328 @@ class ManufacturingOrder(models.Model):
                 }
             )
 
+        # Create product movement record
         self.env["idil.product.movement"].create(
             {
-                "product_id": order.product_id.id,  # Corrected reference to order.product_id
+                "product_id": order.product_id.id,
                 "movement_type": "in",
                 "manufacturing_order_id": order.id,
                 "quantity": order.product_qty,
                 "date": fields.Datetime.now(),
-                "source_document": order.name,  # Use order.name instead of self.name
+                "source_document": order.name,
             }
         )
 
         return order
+
+    # @api.model
+    # def create(self, vals):
+    #     _logger.info("Creating Manufacturing Order with values: %s", vals)
+    #
+    #     # Check BOM and product setup
+    #     if "bom_id" in vals:
+    #         bom = self.env["idil.bom"].browse(vals["bom_id"])
+    #         if bom and bom.product_id:
+    #             vals["product_id"] = bom.product_id.id
+    #             product = bom.product_id
+    #             if product.account_id and not vals.get("commission_employee_id"):
+    #                 raise ValidationError(
+    #                     "The product has a commission account but no employee is selected."
+    #                 )
+    #
+    #     # Set order reference if not provided
+    #     if "name" not in vals or not vals["name"]:
+    #         vals["name"] = self._generate_order_reference(vals)
+    #
+    #     # Set status to done
+    #     vals["status"] = "done"
+    #
+    #     # Create order
+    #     order = super(ManufacturingOrder, self).create(vals)
+    #
+    #     # Ensure valid asset accounts
+    #     if not order.product_id.asset_account_id:
+    #         raise ValidationError(
+    #             f"The product '{order.product_id.name}' does not have a valid asset account."
+    #         )
+    #     for line in order.manufacturing_order_line_ids:
+    #         if not line.item_id.asset_account_id:
+    #             raise ValidationError(
+    #                 f"The item '{line.item_id.name}' does not have a valid asset account."
+    #             )
+    #
+    #     # Check if asset account balance is sufficient
+    #     for line in order.manufacturing_order_line_ids:
+    #         item_account_balance = self._get_account_balance(
+    #             line.item_id.asset_account_id.id
+    #         )
+    #         required_balance = line.cost_price * line.quantity
+    #         if item_account_balance < required_balance:
+    #             raise ValidationError(
+    #                 f"Insufficient balance in account for item '{line.item_id.name}'. "
+    #                 f"Required: {required_balance}, Available: {item_account_balance}"
+    #             )
+    #
+    #     # Create transaction booking
+    #     booking_lines = []
+    #     for line in order.manufacturing_order_line_ids:
+    #         if order.rate <= 0:
+    #             raise ValidationError("Rate cannot be zero")
+    #
+    #         _logger.info("-----------------------------------------------------")
+    #         _logger.info("Starting currency conversion for item: %s", line.item_id.name)
+    #         _logger.info(f"Using exchange rate: {order.rate}")
+    #
+    #         cost_amount_usd = line.cost_price * line.quantity
+    #         cost_amount_sos = cost_amount_usd * order.rate
+    #         # Use the rate field from the order
+    #
+    #         _logger.info(
+    #             f"Cost amount in USD: {cost_amount_usd}, converted to SOS: {cost_amount_sos}"
+    #         )
+    #
+    #         # Get clearing accounts
+    #         source_clearing_account = self.env["idil.chart.account"].search(
+    #             [
+    #                 ("name", "=", "Exchange Clearing Account"),
+    #                 ("currency_id", "=", line.item_id.asset_account_id.currency_id.id),
+    #             ],
+    #             limit=1,
+    #         )
+    #         target_clearing_account = self.env["idil.chart.account"].search(
+    #             [
+    #                 ("name", "=", "Exchange Clearing Account"),
+    #                 (
+    #                     "currency_id",
+    #                     "=",
+    #                     order.product_id.asset_account_id.currency_id.id,
+    #                 ),
+    #             ],
+    #             limit=1,
+    #         )
+    #
+    #         if not source_clearing_account or not target_clearing_account:
+    #             raise ValidationError(
+    #                 "Exchange clearing accounts are required for currency conversion."
+    #             )
+    #
+    #         # Debit line for increasing product stock in product SOS currency
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Manufacturing Order Transaction - Debit",
+    #                     "item_id": line.item_id.id,
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": order.product_id.asset_account_id.id,
+    #                     "transaction_type": "dr",
+    #                     "dr_amount": cost_amount_sos,
+    #                     "cr_amount": 0.0,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             f"Debit line to increase product stock in SOS currency for product: {order.product_id.name}, cost amount: {cost_amount_sos}"
+    #         )
+    #
+    #         # Credit the target clearing account for currency adjustment
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Manufacturing Order Transaction Exchange - Credit",
+    #                     "item_id": line.item_id.id,
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": target_clearing_account.id,
+    #                     "transaction_type": "cr",
+    #                     "dr_amount": 0.0,
+    #                     "cr_amount": line.cost_amount_sos,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             "Credit clearing account for account adjustment: %s with currency adjustment amount: %s",
+    #             line.cost_amount_sos,
+    #             target_clearing_account.name,
+    #         )
+    #
+    #         # Credit the source clearing account for currency adjustment
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Manufacturing Order Transaction Exchange - Debit",
+    #                     "item_id": line.item_id.id,
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": source_clearing_account.id,
+    #                     "transaction_type": "dr",
+    #                     "dr_amount": line.row_total,
+    #                     "cr_amount": 0.0,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             "Debit clearing account for account adjustment: %s with currency adjustment amount: %s",
+    #             line.row_total,
+    #             source_clearing_account.name,
+    #         )
+    #
+    #         # Credit line to descrease item stock with item currency which is USD
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Manufacturing Order Transaction - Credit",
+    #                     "item_id": line.item_id.id,
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": line.item_id.asset_account_id.id,
+    #                     "transaction_type": "cr",
+    #                     "dr_amount": 0.0,
+    #                     "cr_amount": line.row_total,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             f"Credit line to decrease item stock in USD currency for item: {line.item_id.name}, cost amount: {line.row_total}"
+    #         )
+    #     # Add commission booking lines if applicable
+    #     if order.commission_amount > 0:
+    #         if not order.product_id.account_id:
+    #             raise ValidationError(
+    #                 f"The product '{order.product_id.name}' does not have a valid commission account."
+    #             )
+    #
+    #         if (
+    #             order.product_id.account_id.currency_id
+    #             != order.commission_employee_id.account_id.currency_id
+    #         ):
+    #             raise ValidationError(
+    #                 f"The currency for the product's account and the employee's commission account must be the same. "
+    #                 f"Product Account Currency: {order.product_id.account_id.currency_id.name}, "
+    #                 f"Employee Account Currency: {order.commission_employee_id.account_id.currency_id.name}."
+    #             )
+    #
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Commission Expense",
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": order.product_id.account_id.id,
+    #                     "transaction_type": "dr",
+    #                     "dr_amount": order.commission_amount,
+    #                     "cr_amount": 0.0,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             f"Debit line to increase product commission account for product: {order.product_id.name}, commission amount: {order.commission_amount}"
+    #         )
+    #
+    #         if not order.commission_employee_id.account_id:
+    #             raise ValidationError(
+    #                 f"The employee '{order.commission_employee_id.name}' does not have a valid commission account."
+    #             )
+    #
+    #         booking_lines.append(
+    #             (
+    #                 0,
+    #                 0,
+    #                 {
+    #                     "order_line": len(booking_lines) + 1,
+    #                     "description": "Commission Liability",
+    #                     "product_id": order.product_id.id,
+    #                     "account_number": order.commission_employee_id.account_id.id,
+    #                     "transaction_type": "cr",
+    #                     "dr_amount": 0.0,
+    #                     "cr_amount": order.commission_amount,
+    #                     "transaction_date": fields.Date.today(),
+    #                 },
+    #             )
+    #         )
+    #         _logger.info(
+    #             f"Credit line to decrease employee commission account for employee: {order.commission_employee_id.name}, commission amount: {order.commission_amount}"
+    #         )
+    #
+    #     transaction_booking = self.env["idil.transaction_booking"].create(
+    #         {
+    #             "transaction_number": self.env["ir.sequence"].next_by_code(
+    #                 "idil.transaction_booking"
+    #             ),
+    #             "reffno": order.name,
+    #             "manufacturing_order_id": order.id,
+    #             "order_number": order.name,
+    #             "amount": order.product_cost,
+    #             "trx_date": fields.Date.today(),
+    #             "payment_status": "paid",
+    #             "booking_lines": booking_lines,
+    #         }
+    #     )
+    #
+    #     order.write({"transaction_booking_id": transaction_booking.id})
+    #
+    #     # Increase the product's stock quantity based on the BOM
+    #     if order and order.bom_id and order.bom_id.product_id:
+    #         product = order.bom_id.product_id
+    #         product.stock_quantity += order.product_qty
+    #         product.write({"stock_quantity": product.stock_quantity})
+    #
+    #     # Attempt to adjust stock levels
+    #     try:
+    #         for line in order.manufacturing_order_line_ids:
+    #             if line.item_id.item_type == "inventory":
+    #                 if line.item_id.quantity < line.quantity:
+    #                     raise ValidationError(
+    #                         f"Insufficient stock for item '{line.item_id.name}'. Current stock: {line.item_id.quantity}, "
+    #                         f"Requested: {line.quantity}"
+    #                     )
+    #                 with self.env.cr.savepoint():
+    #                     line.item_id.with_context(
+    #                         update_transaction_booking=False
+    #                     ).adjust_stock(line.quantity)
+    #     except ValidationError as e:
+    #         raise ValidationError(e.args[0])
+    #
+    #     if order.commission_amount > 0:
+    #         self.env["idil.commission"].create(
+    #             {
+    #                 "manufacturing_order_id": order.id,
+    #                 "employee_id": order.commission_employee_id.id,
+    #                 "commission_amount": order.commission_amount,
+    #                 "commission_paid": 0,
+    #                 "payment_status": "pending",
+    #                 "commission_remaining": order.commission_amount,
+    #                 "date": fields.Date.context_today(self),
+    #             }
+    #         )
+    #
+    #     self.env["idil.product.movement"].create(
+    #         {
+    #             "product_id": order.product_id.id,  # Corrected reference to order.product_id
+    #             "movement_type": "in",
+    #             "manufacturing_order_id": order.id,
+    #             "quantity": order.product_qty,
+    #             "date": fields.Datetime.now(),
+    #             "source_document": order.name,  # Use order.name instead of self.name
+    #         }
+    #     )
+    #
+    #     return order
 
     def _get_account_balance(self, account_id):
         """Calculate the balance for an account."""
@@ -638,6 +884,40 @@ class ManufacturingOrder(models.Model):
             return self.env["ir.sequence"].next_by_code(
                 "idil.manufacturing.order.sequence"
             )
+
+    def unlink(self):
+        for order in self:
+            try:
+                # Restore raw material stock (increase quantity back)
+                for line in order.manufacturing_order_line_ids:
+                    if line.item_id.item_type == "inventory":
+                        line.item_id.quantity += line.quantity
+                        line.item_id.with_context(
+                            update_transaction_booking=False
+                        ).write({"quantity": line.item_id.quantity})
+                        _logger.info(
+                            f"Stock restored for item: {line.item_id.name}, new quantity: {line.item_id.quantity}"
+                        )
+
+                # Reduce finished product stock (decrease quantity)
+                if order.product_id:
+                    if order.product_id.stock_quantity < order.product_qty:
+                        raise ValidationError(
+                            f"Cannot delete: Insufficient stock for product '{order.product_id.name}'."
+                        )
+                    order.product_id.stock_quantity -= order.product_qty
+                    order.product_id.with_context().write(
+                        {"stock_quantity": order.product_id.stock_quantity}
+                    )
+                    _logger.info(
+                        f"Stock reduced for product: {order.product_id.name}, new quantity: {order.product_id.stock_quantity}"
+                    )
+
+            except ValidationError as e:
+                raise ValidationError(e.args[0])
+
+        # Proceed with the standard unlink behavior if no exception raised
+        return super(ManufacturingOrder, self).unlink()
 
 
 # def write(self, vals):
